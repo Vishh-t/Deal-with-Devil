@@ -30,19 +30,18 @@ A competitive tech event where participants use virtual coins to bid on tech pro
 | Frontend | **React JS** |
 | Exact numbers | Prices, rewards, devil exchange rates and hint price are **to be decided later** (kept in a config file) |
 
-## 3. How Vickrey settlement works
+## 3. How settlement pricing works
 
 1. Each participant places one secret bid per problem, editable until the bidding deadline.
 2. Admin closes bidding and runs settlement.
-3. For a problem with **k slots**, the top k bidders win.
-4. **All winners pay the (k+1)th highest bid**, not their own bid.
-5. If there are fewer than k+1 bids, winners pay the problem's base price (reserve).
-6. Ties go to the earlier submission.
-7. Coins are deducted atomically, the ledger is written, and each participant gets a win or lose pop-up.
+3. Eligible bids across the round are ranked by amount, then submission time, then bid ID. A bid is accepted only while its participant is below the three-win limit and its problem has a free slot.
+4. All winners of a problem pay the same price: the highest bid rejected because that problem was already full. If no bid is rejected for that reason, winners pay the problem's base price (reserve).
+5. Ties go to the earlier submission; bid ID breaks an exact timestamp tie.
+6. Coins are deducted atomically, the ledger is written, and each participant gets a win or lose pop-up.
 
-Why: bidding your true value is the best strategy, so there are no bidding games.
+When the three-win cap does not affect selection, this is the ordinary multi-slot Vickrey price: the (k+1)th bid for k slots, or the reserve if there are too few bids. With the global cap, that shortcut is not always accurate; see section 3a for the complete rule.
 
-Example (k = 2): bids 90, 70, 50, 30. The top two win and both pay 50.
+Example when the cap does not affect selection (k = 2): bids 90, 70, 50, 30. The top two win and both pay 50.
 
 Edge case (handled in two places, see section 3a): a participant could win several problems whose prices add up to more than their balance. Bids are capped when they are placed: a participant's 3 highest bids in a round together cannot exceed their coins (`BID_EXCEEDS_BALANCE`; only the top 3 count because nobody can win more than 3), and a bid below the problem's reserve price is rejected. If an admin deducts coins after bidding, a winner who can no longer pay is marked `UNAFFORDABLE` at settlement and the slot is not reassigned by settlement (auto fill can hand that unsold slot to someone short).
 

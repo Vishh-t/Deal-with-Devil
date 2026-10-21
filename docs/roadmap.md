@@ -1,7 +1,7 @@
 # Deal with Devil: Backend Roadmap
 
 Spring Boot 4.1.1 (Java 21), PostgreSQL in Docker (port 5433), React frontend.
-Event: individual participants bid coins in a sealed Vickrey auction on HackerRank problems. Corruption levels change which hint version a participant gets, and the devil trades corruption for coins.
+Event: individual participants bid coins in a sealed multi-winner auction on HackerRank problems, with round-wide allocation and a three-win cap per participant. When the cap does not affect allocation, its price matches a Vickrey auction. Corruption levels change which hint version a participant gets, and the devil trades corruption for coins.
 
 Tick the boxes as work is finished. Target for the whole backend: about 12 to 15 working days.
 
@@ -11,7 +11,7 @@ Tick the boxes as work is finished. Target for the whole backend: about 12 to 15
 >
 > Update 2026-10-20 (latest): the integration tests were refactored onto the shared `IntegrationTestSupport` base class and `SettlementIntegrationTest` was added (ties, several slots, reserve price, unaffordable winner, settle clicked twice, simultaneous bids). All three integration test classes (`CoinSafetyIntegrationTest`, `RoundFlowIntegrationTest`, `SettlementIntegrationTest`) were run and all 43 integration tests pass (repeated tests count each repetition). A full `mvnw test` run now passes all 180 tests, the project compiles and the app starts normally. The 125-test figure above is the earlier count and is out of date.
 
-> Update 2026-10-21: the Phase 9 backend (steps 1 to 11) is written, with `AllocationFlowIntegrationTest`, `CreditAllIntegrationTest` and unit tests for `SlotSpreader`, `AllocationCalculator` and `AutoFillPlanner`. NOT RUN YET after these last changes: run `mvnw test` and fix whatever fails. Also this day: `DDL_AUTO` env var added (default `update`), the generated startup password silenced, and `frontend-api-contract.md` plus `hacker-auction-context_2.md` updated for every Phase 9 endpoint. The frontend spec PDF predates Phase 9 and does not mention it.
+> Update 2026-10-21: Phase 9 backend steps 1 to 11 are implemented, with `AllocationFlowIntegrationTest`, `CreditAllIntegrationTest` and unit tests for `SlotSpreader`, `AllocationCalculator` and `AutoFillPlanner`. In the current verification, all 188 selected non-database backend tests passed. A full `mvnw test` attempt could not connect to PostgreSQL at `localhost:5433`, so database integration and context-load tests still need to be run with PostgreSQL available. The frontend production build passes; lint completes with existing React warnings. `DDL_AUTO` is configurable (default `update`); the generated startup password is silenced. `frontend-api-contract.md` is the current API reference; the frontend spec PDF predates Phase 9.
 
 ---
 
@@ -58,11 +58,11 @@ Tick the boxes as work is finished. Target for the whole backend: about 12 to 15
 - [x] Admin endpoints: start round, advance phase, pause, next round (plus resume, bidding deadline and settle)
 - [x] Participant endpoints: current round and phase, problem preview (title, category, tier, teaser)
 
-## Phase 5: Sealed bids and Vickrey settlement (about 2 to 3 days)
+## Phase 5: Initial sealed bids and per-problem Vickrey settlement (about 2 to 3 days; allocation later superseded by Phase 9)
 - [x] `Bid` entity: one bid per participant per problem, editable until the deadline
 - [x] Server-side bidding deadline; reject late bids
 - [x] Reject a bid above the participant's balance, and cap total bids at balance (also rejects a bid below the problem's reserve price)
-- [x] Settlement: top k bidders win, all pay the (k+1)th highest bid, reserve price if too few bids, earlier bid wins ties (`VickreyCalculator`, `SettlementService`)
+- [x] Initial settlement: top k bidders win, all pay the (k+1)th highest bid, reserve price if too few bids, earlier bid wins ties (`VickreyCalculator`). Phase 9 replaces this per-problem allocation with the round-wide capped rule below.
 - [x] Settlement deducts coins and writes ledger entries in one transaction (a winner who can no longer pay is marked UNAFFORDABLE; the slot is not reassigned)
 - [x] Results endpoint: won or lost, price paid (`GET /api/me/bids`)
 - [x] Thorough tests for settlement (ties, too few bids, insufficient balance): `VickreyCalculatorTest`, `SettlementServiceTest`, `BidServiceTest` (passing)
@@ -90,14 +90,14 @@ Tick the boxes as work is finished. Target for the whole backend: about 12 to 15
 - [x] Integration test clean-up and settlement tests (2026-10-20, all tests passing): `IntegrationTestSupport` is now the shared base class of all three integration test classes (the duplicated set-up and helpers were removed from `CoinSafetyIntegrationTest` and `RoundFlowIntegrationTest`), and the new `SettlementIntegrationTest` covers ties by submission time, several slots (bids 90/70/50/30 with k = 2), the reserve price floor, an unaffordable winner (slot not reassigned), settle clicked twice at the same moment (winner charged once) and two simultaneous bids over HTTP
 - [x] Admin participant search (2026-10-20, written but NOT yet run): `GET /api/admin/users?q=text` returns the participants whose name or HackerRank ID contains the text (any letter case), so an admin can find the user id for the wallet buttons without knowing it. Without `q` it lists everyone as before. Test: `RoundFlowIntegrationTest.participantSearch_findsByNameOrHackerRankId_ignoringLetterCase`. Documented in `frontend-api-contract.md`
 - [x] Question preview for bidders (2026-10-20, written but NOT yet run): `PUT /api/admin/problems/{id}/preview` (body `{"preview": "text"}`, max 4000 characters, blank removes it) attaches the question text participants read before bidding. It appears as `preview` in `GET /api/rounds/current/problems` (and in the admin problem responses); the HackerRank link is still never shown to bidders and only reaches the winner. Editable only while the round is in PREVIEW, like the other problem fields; the full-replace `PUT /api/admin/problems/{id}` leaves it alone. The new `problems.preview` column is added by `ddl-auto=update` (a migration is needed if you switch to `validate`). Tests: four new unit tests in `ProblemServiceTest` and extra checks in `RoundFlowIntegrationTest.fullRound_fromStartToResults`
-- [ ] Move secrets to environment variables (Google client ID, JWT secret, admin emails and the fallback passcode are read from environment variables, and so are `DB_URL`, `DB_USERNAME` and `DB_PASSWORD`; the database defaults are still `postgres`/`postgres`, so set real values on the server)
+- [ ] Configure deployment secrets outside the repository: `JWT_SECRET` is required and must be a cryptographically random value of at least 32 characters (the app fails to start if it is missing or too short); also set real `GOOGLE_CLIENT_ID`, `ADMIN_EMAILS`, `ADMIN_FALLBACK_PASSCODE` (if used), `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD`. Do not rely on local development placeholders or database defaults on the server.
 - [x] Switch `spring.jpa.hibernate.ddl-auto` from `update` to `validate` (or add migrations) before the event: now `${DDL_AUTO:update}`. On the event server create the tables once with `DDL_AUTO=update`, then run with `DDL_AUTO=validate`. Nothing else to do in code
 - [x] Optional: silence the generated dev password Spring prints at startup (a `UserDetailsService` bean in `SecurityConfig` that never finds anybody; written 2026-10-21, not run yet)
 - [ ] Optional: manual override of a settlement result (listed in the project context; there is no endpoint for it, only undo of coin entries and the corruption level editor)
 - [ ] Deployment plan (server, database, HTTPS) and a dry-run with test accounts
 
-## Phase 9: Exactly 3 problems per person (built 2026-10-21, tests to be run)
-Every participant must end each round with exactly 3 problems. Today each problem is settled on its own and nothing counts wins per person, so someone can win 0, 1, 5 or more. There are 3 contest rounds, each with its own problems, and one problem can go to several people in a round. Nobody can win the same problem twice, so no problem can have more slots than there are participants.
+## Phase 9: Exactly 3 problems per person (built 2026-10-21)
+The original per-problem settlement did not cap wins per person. Phase 9 replaces it with a round-wide allocation and follow-up assignment flow. Every participant should finish each round with exactly 3 problems when available problems and balances permit. There are 3 contest rounds, each with its own problems, and one problem can go to several people in a round. Nobody can win the same problem twice, so no problem can have more slots than there are participants.
 
 ### Agreed design (2026-10-20)
 Three pieces work together: auto slots (right number of slots), a global 3-win cap in settlement (nobody gets more than 3), and an auto fill after settlement (anyone short gets topped up).
