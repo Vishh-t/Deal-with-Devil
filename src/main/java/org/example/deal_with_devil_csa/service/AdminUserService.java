@@ -9,10 +9,17 @@ import org.example.deal_with_devil_csa.domain.User;
 import org.example.deal_with_devil_csa.domain.Wallet;
 import org.example.deal_with_devil_csa.exception.ApiException;
 import org.example.deal_with_devil_csa.exception.ErrorCode;
+import org.example.deal_with_devil_csa.repository.AuditLogRepository;
+import org.example.deal_with_devil_csa.repository.BidRepository;
+import org.example.deal_with_devil_csa.repository.BulkCreditRepository;
+import org.example.deal_with_devil_csa.repository.GameEventRepository;
+import org.example.deal_with_devil_csa.repository.LedgerEntryRepository;
 import org.example.deal_with_devil_csa.repository.ProblemHintRepository;
 import org.example.deal_with_devil_csa.repository.ProblemRepository;
 import org.example.deal_with_devil_csa.repository.UserRepository;
 import org.example.deal_with_devil_csa.repository.WalletRepository;
+import org.example.deal_with_devil_csa.web.dto.EraseParticipantsRequest;
+import org.example.deal_with_devil_csa.web.dto.EraseParticipantsResponse;
 import org.example.deal_with_devil_csa.web.dto.HintResponse;
 import org.example.deal_with_devil_csa.web.dto.MeResponse;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,16 +30,24 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * The admin's view of the participants: the list, the hint that matches a participant's corruption level,
- * and manual edits of the corruption level.
+ * manual edits of the corruption level, and the "erase everything" reset used to clear test data before the event.
  */
 @Service
 @RequiredArgsConstructor
 public class AdminUserService
 {
+    /** The word the admin must send (and type in the confirm box) before every participant is erased. */
+    public static final String ERASE_CONFIRMATION = "ERASE";
+
     private final WalletRepository walletRepository;
     private final UserRepository userRepository;
     private final ProblemRepository problemRepository;
     private final ProblemHintRepository hintRepository;
+    private final BidRepository bidRepository;
+    private final LedgerEntryRepository ledgerEntryRepository;
+    private final GameEventRepository gameEventRepository;
+    private final BulkCreditRepository bulkCreditRepository;
+    private final AuditLogRepository auditLogRepository;
 
     /** Every participant (not admins) with their coins and corruption level, sorted by name (unnamed last). */
     @Transactional(readOnly = true)
@@ -111,6 +126,39 @@ public class AdminUserService
         {
             throw new ApiException(ErrorCode.USER_NOT_FOUND);
         }
+    }
+
+    /**
+     * Erases every participant and everything that belongs to them, so test runs can be cleared before the real
+     * event: bids, wallets and coins, the ledger, personal notifications, "credit everyone" records and the participant
+     * user accounts themselves. Their tokens stop working at once (the user row is gone), and anyone who signs in with
+     * Google again starts fresh: a new account, the profile form, a new wallet.
+     *
+     * Admin accounts, problems and hints, rounds (including their phase) and broadcast notifications are NOT touched.
+     * Everything runs in one transaction, so a failure leaves the data exactly as it was. The rows are deleted in
+     * foreign-key order. This is the one place the append-only ledger is allowed to lose rows.
+     *
+     * The caller must send the confirmation word (ERASE_CONFIRMATION), a guard against a stray or scripted call.
+     */
+    @Transactional
+    @PreAuthorize("hasRole('ADMIN') and @guard.isSelf(#adminId)")
+    public EraseParticipantsResponse eraseAllParticipants(Long adminId, EraseParticipantsRequest request)
+    {
+        if (!ERASE_CONFIRMATION.equals(request.confirmation().trim()))
+        {
+            throw new ApiException(ErrorCode.VALIDATION_FAILED, null,
+                    java.util.Map.of("confirmation", "Send the word " + ERASE_CONFIRMATION + " to confirm."));
+        }
+
+        Role role = Role.PARTICIPANT;
+        auditLogRepository.deleteAllByActorRole(role);
+        int notifications = gameEventRepository.deleteAllByUserRole(role);
+        int bids = bidRepository.deleteAllByUserRole(role);
+        int ledgerEntries = ledgerEntryRepository.deleteAllByUserOrActorRole(role);
+        bulkCreditRepository.deleteAllInBatch();
+        walletRepository.deleteAllByUserRole(role);
+        int participants = userRepository.deleteAllByRole(role);
+        return new EraseParticipantsResponse(participants, bids, ledgerEntries, notifications);
     }
 
     // ---- Internals ----

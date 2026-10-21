@@ -179,6 +179,13 @@ export interface CreditAllResponse {
   totalCredited: number
 }
 
+export interface EraseParticipantsResponse {
+  participants: number
+  bids: number
+  ledgerEntries: number
+  notifications: number
+}
+
 export interface BidResponse {
   problemId: number
   problemTitle: string

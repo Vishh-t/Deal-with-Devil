@@ -2,11 +2,15 @@ package org.example.deal_with_devil_csa.web.controller;
 
 import java.util.List;
 
+import org.example.deal_with_devil_csa.security.CurrentUser;
 import org.example.deal_with_devil_csa.service.AdminUserService;
 import org.example.deal_with_devil_csa.web.dto.CorruptionLevelRequest;
+import org.example.deal_with_devil_csa.web.dto.EraseParticipantsRequest;
+import org.example.deal_with_devil_csa.web.dto.EraseParticipantsResponse;
 import org.example.deal_with_devil_csa.web.dto.HintResponse;
 import org.example.deal_with_devil_csa.web.dto.MeResponse;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -58,5 +62,16 @@ public class AdminUserController
     public void revokeSessions(@PathVariable Long userId)
     {
         adminUserService.revokeSessions(userId);
+    }
+
+    /**
+     * Erases every participant and all their data (bids, wallets, ledger, notifications, accounts). Admins, problems,
+     * hints and rounds are kept. The body must carry the word ERASE. Meant for clearing test data before the event.
+     */
+    @PostMapping("/erase")
+    public EraseParticipantsResponse eraseAll(@AuthenticationPrincipal CurrentUser admin,
+                                              @Valid @RequestBody EraseParticipantsRequest request)
+    {
+        return adminUserService.eraseAllParticipants(admin.id(), request);
     }
 }

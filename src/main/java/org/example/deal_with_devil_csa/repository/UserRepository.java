@@ -38,4 +38,12 @@ public interface UserRepository extends JpaRepository<User, Long>
 
     /** True if some OTHER user already has this HackerRank ID (case-insensitive). */
     boolean existsByHackerRankIdIgnoreCaseAndIdNot(String hackerRankId, Long id);
+
+    /**
+     * Bulk delete of every user with the given role (used by "erase participant data"). Everything that points at
+     * these users (bids, wallets, ledger, notifications, audit lines) must be deleted first.
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from User u where u.role = :role")
+    int deleteAllByRole(@Param("role") Role role);
 }

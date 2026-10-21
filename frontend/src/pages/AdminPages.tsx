@@ -10,6 +10,7 @@ import type {
   AuditLogResponse,
   BidCoverageResponse,
   CreditAllResponse,
+  EraseParticipantsResponse,
   GameConfigResponse,
   HintResponse,
   LedgerEntryResponse,
@@ -577,6 +578,7 @@ function ParticipantsPage() {
   const [bulkReason, setBulkReason] = useState('')
   const [bulkBusy, setBulkBusy] = useState(false)
   const [bulkRequestId, setBulkRequestId] = useState<string | null>(null)
+  const [eraseBusy, setEraseBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const requestId = useRef(0)
@@ -714,6 +716,28 @@ function ParticipantsPage() {
     finally { setBulkBusy(false) }
   }
 
+  async function eraseAll() {
+    if (!session) return
+    const typed = window.prompt(`This permanently deletes ALL ${participants.length} participant account(s) and everything attached to them: bids, wallets, coin history and notifications. Admins, problems and rounds are kept. This cannot be undone.\n\nType ERASE to confirm:`)
+    if (typed === null) return
+    if (typed.trim() !== 'ERASE') { setError('Erase cancelled: you must type ERASE exactly.'); return }
+    setEraseBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      const result = await api<EraseParticipantsResponse>('/api/admin/users/erase', {
+        method: 'POST',
+        body: JSON.stringify({ confirmation: 'ERASE' }),
+      }, session.token)
+      setSelectedId(null)
+      setBulkRequestId(null)
+      setMessage(`Erased ${result.participants} participant(s), ${result.bids} bid(s), ${result.ledgerEntries} ledger entr${result.ledgerEntries === 1 ? 'y' : 'ies'} and ${result.notifications} notification(s).`)
+      await loadData('')
+      setQuery('')
+    } catch (cause) { setError(errorMessage(cause)) }
+    finally { setEraseBusy(false) }
+  }
+
   if (loading) return <Loading />
   return <>
     <div className="roster-hero">
@@ -734,6 +758,13 @@ function ParticipantsPage() {
           {bulkBusy ? 'Processing…' : bulkRequestId ? 'Retry credit request' : 'Credit all participants'}
         </button>
       </div>
+    </section>
+    <section className="admin-card danger-zone-card">
+      <div className="panel-heading"><div><p className="eyebrow">DANGER ZONE</p><h2>Erase all participant data</h2></div></div>
+      <p className="muted">Deletes every participant account with their bids, wallets, coin history and notifications. Admin accounts, problems, hints and rounds are kept. Use it to clear test data before the event.</p>
+      <button className="danger-button" disabled={eraseBusy || bulkBusy} onClick={() => void eraseAll()}>
+        {eraseBusy ? 'Erasing…' : 'Erase all participant data'}
+      </button>
     </section>
     <div className="roster-dashboard">
       <section className="roster-table-panel">
